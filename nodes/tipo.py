@@ -156,6 +156,7 @@ class TIPO:
                 "format": (
                     "STRING",
                     {
+                        # MODIFIED: Removed NL placeholders from default format
                         "default": """<|special|>, 
 <|characters|>, <|copyrights|>, 
 <|artist|>, 
@@ -165,8 +166,6 @@ class TIPO:
 <|wildcard_camera_lighting|>, <|wildcard_art_style|>,
 
 <|general|>,
-
-<|extended|>.
 
 <|quality|>, <|meta|>, <|rating|>""",
                         "multiline": True,
@@ -248,13 +247,11 @@ class TIPO:
         black_list = [t.strip() for t in ban_tags.split(",") if t.strip()]
         tipo.BAN_TAGS = black_list
         
-        # This dictionary will hold the final, extended tags for each part.
         final_prompt_parts = {}
         all_original_tags_list = []
         all_addon_tags_list = []
 
         # === Part 1: Process main 'tags' and 'nl_prompt' ===
-        # This generates content for standard placeholders like <general>, <artist>, etc.
         if tags.strip() or nl_prompt.strip():
             prompt_parse_strength = parse_prompt_attention(tags)
             nl_prompt_parse_strength = parse_prompt_attention(nl_prompt)
@@ -272,23 +269,26 @@ class TIPO:
             all_original_tags_list.extend(main_all_tags)
 
             org_tag_map = seperate_tags(main_all_tags)
-            meta, operations, general, nl_prompt_to_model = parse_tipo_request(
+            meta, operations, general, _ = parse_tipo_request(
                 org_tag_map, nl_prompt_processed,
                 tag_length_target=tag_length.replace(" ", "_"),
                 nl_length_target=nl_length.replace(" ", "_"),
-                generate_extra_nl_prompt=(not nl_prompt_processed and "<|extended|>" in format) or "<|generated|>" in format,
+                generate_extra_nl_prompt=False, # MODIFIED: Disable NL generation
             )
             meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
 
             tag_map_main, _ = tipo_runner(
-                meta, operations, general, nl_prompt_to_model,
+                meta, operations, general, "", # MODIFIED: Pass empty string for NL prompt
                 temperature=temperature, seed=seed, top_p=top_p, min_p=min_p, top_k=top_k,
             )
             
-            # Store the full result from the main run
+            # MODIFIED: Remove duplicates from each category list
+            for key, tag_list in tag_map_main.items():
+                if isinstance(tag_list, list):
+                    tag_map_main[key] = list(dict.fromkeys(tag_list))
+
             final_prompt_parts = apply_strength(tag_map_main, strength_map, strength_map_nl)
 
-            # Find addon tags from the main run
             main_original_tags_set = set(main_all_tags)
             for cate, tag_list in tag_map_main.items():
                 if isinstance(tag_list, list):
@@ -308,14 +308,15 @@ class TIPO:
 
         current_seed = seed + 1
         for placeholder, category_tags in wildcard_categories.items():
+            placeholder_key = placeholder.strip("<|>")
             if not category_tags:
-                final_prompt_parts[placeholder.strip("<|>")] = ""
+                final_prompt_parts[placeholder_key] = ""
                 continue
 
             logger.info(f"TIPO is extending category: {placeholder}")
-            all_original_tags_list.extend([t.strip() for t in category_tags.split(',') if t.strip()])
-
             cat_all_tags = [t.strip() for t in category_tags.split(',') if t.strip()]
+            all_original_tags_list.extend(cat_all_tags)
+
             cat_org_tag_map = seperate_tags(cat_all_tags)
             
             cat_meta, cat_operations, cat_general, _ = parse_tipo_request(
@@ -336,40 +337,44 @@ class TIPO:
                     for tag in tag_list:
                         if tag not in original_tags_set:
                             addon_tags.append(tag)
-                            all_addon_tags_list.append(tag)
             
-            final_prompt_parts[placeholder.strip("<|>")] = (category_tags + ", " + ", ".join(addon_tags)) if addon_tags else category_tags
+            # MODIFIED: Combine and de-duplicate tags for the category
+            combined_tags_list = cat_all_tags + addon_tags
+            unique_tags_list = list(dict.fromkeys(combined_tags_list))
+            all_addon_tags_list.extend(addon_tags) # Still add to global addon list for unformatted output
+
+            final_prompt_parts[placeholder_key] = ", ".join(unique_tags_list)
             current_seed += 1
 
         # === Part 3: Final Assembly ===
         final_prompt = apply_format(final_prompt_parts, format)
         
-        # Clean up any resulting empty commas or spaces
-        final_prompt = re.sub(r',\s*,', ',', final_prompt)
-        final_prompt = re.sub(r'(,\s*){2,}', ',', final_prompt)
-        final_prompt = re.sub(r'^\s*,\s*|\s*,\s*$', '', final_prompt).strip()
+        # MODIFIED: Final global de-duplication pass
+        final_tags_list = [tag.strip() for tag in final_prompt.split(',') if tag.strip()]
+        unique_final_tags_list = list(dict.fromkeys(final_tags_list))
+        final_prompt = ", ".join(unique_final_tags_list)
 
-        # === Part 4: Reconstruct other return values for consistency ===
-        all_original_tags_str = ", ".join(all_original_tags_list)
-        unformatted_prompt_by_tipo = all_original_tags_str + ", " + ", ".join(all_addon_tags_list)
+        # === Part 4: Reconstruct other return values ===
+        all_original_tags_str = ", ".join(list(dict.fromkeys(all_original_tags_list)))
+        unformatted_addon_tags = ", ".join(list(dict.fromkeys(all_addon_tags_list)))
+        unformatted_prompt_by_tipo = (all_original_tags_str + ", " + unformatted_addon_tags).strip(", ")
         
-        # For user_prompt, we format the original tags without TIPO extension
         user_prompt_parts = seperate_tags(all_original_tags_list)
         formatted_prompt_by_user = apply_format(user_prompt_parts, format)
         
-        # Replace wildcard placeholders in user_prompt with original tags
         for placeholder, original_tags in wildcard_categories.items():
             formatted_prompt_by_user = formatted_prompt_by_user.replace(placeholder, original_tags)
-        formatted_prompt_by_user = re.sub(r',\s*,', ',', formatted_prompt_by_user)
-        formatted_prompt_by_user = re.sub(r'(,\s*){2,}', ',', formatted_prompt_by_user)
-        formatted_prompt_by_user = re.sub(r'^\s*,\s*|\s*,\s*$', '', formatted_prompt_by_user).strip()
+        
+        user_tags_list = [tag.strip() for tag in formatted_prompt_by_user.split(',') if tag.strip()]
+        formatted_prompt_by_user = ", ".join(list(dict.fromkeys(user_tags_list)))
 
-        unformatted_prompt_by_user = all_original_tags_str + nl_prompt
+        unformatted_prompt_by_user = all_original_tags_str # NL is disabled
         
         return (final_prompt, formatted_prompt_by_user, unformatted_prompt_by_tipo, unformatted_prompt_by_user)
 
 
 class TIPOOperation:
+    # This class remains unchanged.
     INPUT_TYPES = lambda: { "required": { "tags": ("STRING", {"defaultInput": True, "multiline": True}), "nl_prompt": ("STRING", {"defaultInput": True, "multiline": True}), "ban_tags": ("STRING", {"defaultInput": True, "multiline": True}), "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}), "operation": (sorted(OPERATION_LIST), {"default": sorted(OPERATION_LIST)[0]}), "width": ("INT", {"default": 1024, "max": 16384}), "height": ("INT", {"default": 1024, "max": 16384}), "temperature": ("FLOAT", {"default": 0.5, "step": 0.01}), "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}), "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}), "top_k": ("INT", {"default": 80}), "tag_length": (["very_short", "short", "long", "very_long"], {"default": "long"}), "nl_length": (["very_short", "short", "long", "very_long"], {"default": "long"}), "seed": ("INT", {"default": 1234}), "device": (["cpu", "cuda"], {"default": "cuda"}), }, }
     RETURN_TYPES = ("LIST", "LIST")
     RETURN_NAMES = ("full_output", "addon_output")
@@ -445,6 +450,7 @@ class TIPOOperation:
 
 
 class TIPOFormat:
+    # This class remains unchanged.
     INPUT_TYPES = lambda: { "required": { "full_output": ("LIST", {"default": []}), "addon_output": ("LIST", {"default": []}), "format": ("STRING", { "default": """<|special|>, \n<|characters|>, <|copyrights|>, \n<|artist|>, \n\n<|general|>,\n\n<|extended|>.\n\n<|quality|>, <|meta|>, <|rating|>""", "multiline": True, }), }, }
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = ("prompt", "user_prompt", "unformatted_prompt", "unformatted_user_prompt")
