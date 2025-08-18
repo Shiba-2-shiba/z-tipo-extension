@@ -1,6 +1,3 @@
-##
-## ====================== Installer ======================
-##
 import os
 import sys
 import logging
@@ -155,8 +152,21 @@ def install_llama_cpp():
 
 
 def install_tipo_kgen():
-    version = get_installed_version("tipo-kgen")
-    if version is not None and version >= KGEN_VERSION:
+    """
+    tipo-kgenがインストールされていない場合のみ、
+    Shiba-2-shiba/KGenリポジトリからインストールします。
+    """
+    # パッケージが既にインストールされているかチェック
+    if get_installed_version("tipo-kgen") is not None:
+        logger.info("tipo-kgen is already installed, skipping installation.")
         return
-    logger.info("Attempting to install tipo_kgen")
-    run_pip(f'install -U "tipo-kgen>={KGEN_VERSION}"')
+
+    # インストールされていない場合、指定のGitHubリポジトリからインストール
+    logger.info("Attempting to install tipo-kgen from Shiba-2-shiba/KGen repository")
+    run_pip('install -U "git+https://github.com/Shiba-2-shiba/KGen.git"')
+
+
+# 既存のコードを実行する場合
+if __name__ == '__main__':
+    install_llama_cpp()
+    install_tipo_kgen()
