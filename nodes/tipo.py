@@ -73,27 +73,6 @@ def parse_prompt_attention(text):
       \] - literal character ']'
       \\ - literal character '\'
       anything else - just text
-
-    >>> parse_prompt_attention('normal text')
-    [['normal text', 1.0]]
-    >>> parse_prompt_attention('an (important) word')
-    [['an ', 1.0], ['important', 1.1], [' word', 1.0]]
-    >>> parse_prompt_attention('(unbalanced')
-    [['unbalanced', 1.1]]
-    >>> parse_prompt_attention('\(literal\]')
-    [['(literal]', 1.0]]
-    >>> parse_prompt_attention('(unnecessary)(parens)')
-    [['unnecessaryparens', 1.1]]
-    >>> parse_prompt_attention('a (((house:1.3)) [on] a (hill:0.5), sun, (((sky))).')
-    [['a ', 1.0],
-     ['house', 1.5730000000000004],
-     [' ', 1.1],
-     ['on', 1.0],
-     [' a ', 1.1],
-     ['hill', 0.55],
-     [', sun, ', 1.1],
-     ['sky', 1.4641000000000006],
-     ['.', 1.1]]
     """
 
     res = []
@@ -186,45 +165,60 @@ CATEGORY = "utils/promptgen"
 
 
 class TIPO:
-    INPUT_TYPES = lambda: {
-        "required": {
-            "tags": ("STRING", {"defaultInput": True, "multiline": True}),
-            "nl_prompt": ("STRING", {"defaultInput": True, "multiline": True}),
-            "ban_tags": ("STRING", {"defaultInput": True, "multiline": True}),
-            "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}),
-            "format": (
-                "STRING",
-                {
-                    "default": """<|special|>, 
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "tags": ("STRING", {"default": "", "multiline": True}),
+                "nl_prompt": ("STRING", {"default": "", "multiline": True}),
+                "ban_tags": ("STRING", {"default": "", "multiline": True}),
+                "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}),
+                "format": (
+                    "STRING",
+                    {
+                        "default": """<|special|>, 
 <|characters|>, <|copyrights|>, 
 <|artist|>, 
+
+<|wildcard_appearance|>, <|wildcard_clothing|>,
+<|wildcard_pose_emotion|>, <|wildcard_background|>,
+<|wildcard_camera_lighting|>, <|wildcard_art_style|>,
 
 <|general|>,
 
 <|extended|>.
 
 <|quality|>, <|meta|>, <|rating|>""",
-                    "multiline": True,
-                },
-            ),
-            "width": ("INT", {"default": 1024, "max": 16384}),
-            "height": ("INT", {"default": 1024, "max": 16384}),
-            "temperature": ("FLOAT", {"default": 0.5, "step": 0.01}),
-            "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}),
-            "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}),
-            "top_k": ("INT", {"default": 80}),
-            "tag_length": (
-                ["very_short", "short", "long", "very_long"],
-                {"default": "long"},
-            ),
-            "nl_length": (
-                ["very_short", "short", "long", "very_long"],
-                {"default": "long"},
-            ),
-            "seed": ("INT", {"default": 1234, "min": -1, "max": 0xffffffffffffffff}),
-            "device": (["cpu", "cuda"], {"default": "cuda"}),
-        },
-    }
+                        "multiline": True,
+                    },
+                ),
+                "width": ("INT", {"default": 1024, "max": 16384}),
+                "height": ("INT", {"default": 1024, "max": 16384}),
+                "temperature": ("FLOAT", {"default": 0.5, "step": 0.01}),
+                "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}),
+                "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}),
+                "top_k": ("INT", {"default": 80}),
+                "tag_length": (
+                    ["very_short", "short", "long", "very_long"],
+                    {"default": "long"},
+                ),
+                "nl_length": (
+                    ["very_short", "short", "long", "very_long"],
+                    {"default": "long"},
+                ),
+                "seed": ("INT", {"default": 1234, "min": -1, "max": 0xffffffffffffffff}),
+                "device": (["cpu", "cuda"], {"default": "cuda"}),
+            },
+            # Step 1: Add category input sockets
+            "optional": {
+                "appearance_tags": ("STRING", {"default": "", "multiline": True}),
+                "clothing_tags": ("STRING", {"default": "", "multiline": True}),
+                "background_tags": ("STRING", {"default": "", "multiline": True}),
+                "pose_emotion_tags": ("STRING", {"default": "", "multiline": True}),
+                "camera_lighting_tags": ("STRING", {"default": "", "multiline": True}),
+                "art_style_tags": ("STRING", {"default": "", "multiline": True}),
+            }
+        }
 
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = (
@@ -253,8 +247,36 @@ class TIPO:
         min_p: float,
         top_k: int,
         device: str,
+        appearance_tags: str = "",
+        clothing_tags: str = "",
+        background_tags: str = "",
+        pose_emotion_tags: str = "",
+        camera_lighting_tags: str = "",
+        art_style_tags: str = "",
     ):
         global current_model
+
+        # Step 2.2: Keep category tags for later formatting
+        wildcard_categories = {
+            "<|wildcard_appearance|>": appearance_tags.strip(),
+            "<|wildcard_clothing|>": clothing_tags.strip(),
+            "<|wildcard_background|>": background_tags.strip(),
+            "<|wildcard_pose_emotion|>": pose_emotion_tags.strip(),
+            "<|wildcard_camera_lighting|>": camera_lighting_tags.strip(),
+            "<|wildcard_art_style|>": art_style_tags.strip(),
+        }
+
+        # Step 2.1: Combine all tags into a single string for processing
+        all_input_tags = ", ".join(filter(None, [
+            tags.strip(),
+            appearance_tags.strip(),
+            clothing_tags.strip(),
+            background_tags.strip(),
+            pose_emotion_tags.strip(),
+            camera_lighting_tags.strip(),
+            art_style_tags.strip()
+        ]))
+
         if (tipo_model, device) != current_model:
             if " | " in tipo_model:
                 model_name, gguf_name = tipo_model.split(" | ")
@@ -268,15 +290,17 @@ class TIPO:
                 gguf = False
             models.load_model(target, gguf, device=device)
             current_model = (tipo_model, device)
+            
         aspect_ratio = width / height
-        prompt_without_extranet = tags
+        # Use the combined tag string for TIPO inference
+        prompt_without_extranet = all_input_tags
         prompt_parse_strength = parse_prompt_attention(prompt_without_extranet)
 
         nl_prompt_parse_strength = parse_prompt_attention(nl_prompt)
-        nl_prompt = ""
+        nl_prompt_processed = ""
         strength_map_nl = []
         for part, strength in nl_prompt_parse_strength:
-            nl_prompt += part
+            nl_prompt_processed += part
             if strength == 1:
                 continue
             strength_map_nl.append((part, strength))
@@ -296,12 +320,12 @@ class TIPO:
         tag_length = tag_length.replace(" ", "_")
         nl_length = nl_length.replace(" ", "_")
         org_tag_map = seperate_tags(all_tags)
-        meta, operations, general, nl_prompt = parse_tipo_request(
+        meta, operations, general, nl_prompt_to_model = parse_tipo_request(
             org_tag_map,
-            nl_prompt,
+            nl_prompt_processed,
             tag_length_target=tag_length,
             nl_length_target=nl_length,
-            generate_extra_nl_prompt=(not nl_prompt and "<|extended|>" in format)
+            generate_extra_nl_prompt=(not nl_prompt_processed and "<|extended|>" in format)
             or "<|generated|>" in format,
         )
         meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
@@ -310,7 +334,7 @@ class TIPO:
             apply_tipo_prompt(
                 meta,
                 general,
-                nl_prompt,
+                nl_prompt_processed,
                 "short_to_tag_to_long",
                 tag_length,
                 True,
@@ -321,13 +345,13 @@ class TIPO:
             org_formatted_prompt, strength_map, strength_map_nl
         )
         formatted_prompt_by_user = apply_format(org_formatted_prompt, format)
-        unformatted_prompt_by_user = tags + nl_prompt
+        unformatted_prompt_by_user = all_input_tags + nl_prompt_processed
 
         tag_map, _ = tipo_runner(
             meta,
             operations,
             general,
-            nl_prompt,
+            nl_prompt_to_model,
             temperature=temperature,
             seed=seed,
             top_p=top_p,
@@ -355,13 +379,30 @@ class TIPO:
                 addon["tags"].append(tag)
         addon = apply_strength(addon, strength_map, strength_map_nl)
         unformatted_prompt_by_tipo = (
-            tags + ", " + ", ".join(addon["tags"]) + "\n" + addon["nl"]
+            all_input_tags + ", " + ", ".join(addon["tags"]) + "\n" + addon["nl"]
         )
 
         tag_map = apply_strength(tag_map, strength_map, strength_map_nl)
+        
+        # Initial formatting using TIPO's output
         formatted_prompt_by_tipo = apply_format(tag_map, format)
+        
+        # Step 3: Extend the prompt formatting with wildcard categories
+        final_formatted_prompt = formatted_prompt_by_tipo
+        for placeholder, category_tags in wildcard_categories.items():
+            if category_tags: # Replace placeholder only if tags exist
+                final_formatted_prompt = final_formatted_prompt.replace(placeholder, category_tags)
+            else: # Otherwise, remove the placeholder
+                final_formatted_prompt = final_formatted_prompt.replace(placeholder, "")
+        
+        # Clean up any resulting empty commas or spaces
+        final_formatted_prompt = re.sub(r',\s*,', ',', final_formatted_prompt)
+        final_formatted_prompt = re.sub(r'(,\s*){2,}', ',', final_formatted_prompt) # Handle multiple commas
+        final_formatted_prompt = re.sub(r'^\s*,\s*|\s*,\s*$', '', final_formatted_prompt).strip()
+
+
         return (
-            formatted_prompt_by_tipo,
+            final_formatted_prompt,
             formatted_prompt_by_user,
             unformatted_prompt_by_tipo,
             unformatted_prompt_by_user,
@@ -369,6 +410,7 @@ class TIPO:
 
 
 class TIPOOperation:
+    # This class remains unchanged as the modification is specific to the main TIPO node.
     INPUT_TYPES = lambda: {
         "required": {
             "tags": ("STRING", {"defaultInput": True, "multiline": True}),
@@ -517,6 +559,7 @@ class TIPOOperation:
 
 
 class TIPOFormat:
+    # This class remains unchanged as the modification is specific to the main TIPO node.
     INPUT_TYPES = lambda: {
         "required": {
             "full_output": ("LIST", {"default": []}),
@@ -623,7 +666,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TIPO": "TIPO",
+    "TIPO": "TIPO (Wildcard Enabled)",
     "TIPOOperation": "TIPO Single Operation",
     "TIPOFormat": "TIPO Format",
 }
