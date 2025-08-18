@@ -2,9 +2,8 @@ import os
 import sys
 import logging
 import copy
-import pkg_resources
 import subprocess
-
+from importlib import metadata
 
 KGEN_VERSION = "0.2.0"
 python = sys.executable
@@ -69,8 +68,8 @@ logger.debug("Logger initialized.")
 
 def get_installed_version(package: str):
     try:
-        return pkg_resources.get_distribution(package).version
-    except Exception:
+        return metadata.version(package)
+    except metadata.PackageNotFoundError:
         return None
 
 
