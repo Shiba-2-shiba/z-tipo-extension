@@ -281,7 +281,11 @@ class TIPO:
                 meta, operations, general, "", # MODIFIED: Pass empty string for NL prompt
                 temperature=temperature, seed=seed, top_p=top_p, min_p=min_p, top_k=top_k,
             )
-            
+ 
+            if 'general' in tag_map_main and isinstance(tag_map_main['general'], list):
+                tag_map_main['general'] = [tag for tag in tag_map_main['general'] if tag.strip() != "1.0"]
+
+ 
             # MODIFIED: Remove duplicates from each category list
             for key, tag_list in tag_map_main.items():
                 if isinstance(tag_list, list):
