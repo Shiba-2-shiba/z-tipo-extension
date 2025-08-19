@@ -1,3 +1,13 @@
+# TIPO-extension(フォーク版)
+
+ComfyUIで使用するために調整を加えたものです。
+
+基本的には「https://github.com/Shiba-2-shiba/wildcard_tagnodes」と合わせて使用することを前提としています。
+
+ノードは、「Tagのみ出力」される「wildcard enabled」と「NLのみ出力」される「natural language」が使用できます。
+
+
+
 # TIPO-extension [SD-WebUI, ComfyUI, Forge]
 
 A general extension to utilize TIPO or DanTagGen to do "text-presampling" based on KGen library:
