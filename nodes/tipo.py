@@ -378,6 +378,7 @@ class TIPONaturalLanguage:
     A node dedicated to generating natural language (NL) descriptions from tags.
     It first creates an overall description, then uses it as context to generate
     more detailed descriptions for individual categories, ensuring consistency.
+    Finally, it combines all descriptions into a single, cleaned-up paragraph.
     """
     @classmethod
     def INPUT_TYPES(s):
@@ -413,8 +414,9 @@ class TIPONaturalLanguage:
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",)
     RETURN_NAMES = (
+        "final_nl",
         "overall_nl",
         "appearance_nl",
         "clothing_nl",
@@ -425,6 +427,52 @@ class TIPONaturalLanguage:
     )
     FUNCTION = "execute"
     CATEGORY = "utils/promptgen"
+
+    def _post_process_nl(self, nl_parts: list[str]) -> str:
+        """
+        Combines, cleans, and deduplicates a list of NL strings.
+        """
+        # Patterns for common, often redundant introductory phrases.
+        redundant_starters = [
+            r'^\s*In this scene,?\s*',
+            r'^\s*The artwork depicts\s*',
+            r'^\s*This image features\s*',
+            r'^\s*It features\s*',
+            r'^\s*by the artist\s*,?\s*',
+            r'^\s*by artist\s*,?\s*',
+            r'^\s*View from\s*',
+            r'^\s*The image shows\s*',
+            r'^\s*The scene is\s*',
+        ]
+        pattern = re.compile('|'.join(redundant_starters), re.IGNORECASE)
+
+        seen_sentences = set()
+        final_sentences = []
+
+        for nl_part in nl_parts:
+            if not nl_part or not nl_part.strip():
+                continue
+            
+            # Split into sentences more robustly.
+            sentences = re.split(r'(?<=[.!?])\s+', nl_part.strip())
+
+            for sentence in sentences:
+                if not sentence or not sentence.strip():
+                    continue
+
+                # 1. Clean the sentence by removing redundant starters.
+                cleaned_sentence = pattern.sub('', sentence).strip()
+                
+                # 2. Capitalize the first letter.
+                if cleaned_sentence:
+                    cleaned_sentence = cleaned_sentence[0].upper() + cleaned_sentence[1:]
+
+                # 3. Check for duplicates (case-insensitive).
+                if cleaned_sentence.lower() not in seen_sentences:
+                    seen_sentences.add(cleaned_sentence.lower())
+                    final_sentences.append(cleaned_sentence)
+
+        return " ".join(final_sentences)
 
     def execute(
         self,
@@ -520,16 +568,12 @@ class TIPONaturalLanguage:
             cat_tags = [t.strip() for t in category_tags_str.split(',') if t.strip()]
             cat_org_tag_map = seperate_tags(cat_tags)
 
-            # MODIFIED: Create a more specific prompt to focus the model's output
-            # This instructs the model to use the overall_nl as context but to only
-            # describe the specific category, preventing content from other categories.
             category_name_for_prompt = name.replace('_', ' ')
             contextual_prompt = f"{overall_nl} In this scene, describe the {category_name_for_prompt}."
 
-            # Use "short_to_tag_to_long" to refine/expand the overall NL with category-specific tags
             cat_meta, cat_ops, cat_general, cat_nl_prompt = tipo_single_request(
                 cat_org_tag_map,
-                nl_prompt=contextual_prompt, # Provide the new focused prompt
+                nl_prompt=contextual_prompt,
                 nl_length_target=category_nl_length.replace(" ", "_"),
                 operation="short_to_tag_to_long"
             )
@@ -543,7 +587,13 @@ class TIPONaturalLanguage:
             logger.info(f"  -> {name} NL: {category_nls[output_key][:100]}...")
             current_seed += 1
 
+        # === 3. Post-process and combine all NL parts ===
+        all_nl_parts = [overall_nl] + list(category_nls.values())
+        final_nl = self._post_process_nl(all_nl_parts)
+        logger.info(f"Final integrated NL: {final_nl[:150]}...")
+
         return (
+            final_nl,
             overall_nl,
             category_nls.get("appearance_nl", ""),
             category_nls.get("clothing_nl", ""),
