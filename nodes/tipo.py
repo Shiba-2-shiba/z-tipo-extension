@@ -520,10 +520,16 @@ class TIPONaturalLanguage:
             cat_tags = [t.strip() for t in category_tags_str.split(',') if t.strip()]
             cat_org_tag_map = seperate_tags(cat_tags)
 
+            # MODIFIED: Create a more specific prompt to focus the model's output
+            # This instructs the model to use the overall_nl as context but to only
+            # describe the specific category, preventing content from other categories.
+            category_name_for_prompt = name.replace('_', ' ')
+            contextual_prompt = f"{overall_nl} In this scene, describe the {category_name_for_prompt}."
+
             # Use "short_to_tag_to_long" to refine/expand the overall NL with category-specific tags
             cat_meta, cat_ops, cat_general, cat_nl_prompt = tipo_single_request(
                 cat_org_tag_map,
-                nl_prompt=overall_nl, # Provide overall NL as context
+                nl_prompt=contextual_prompt, # Provide the new focused prompt
                 nl_length_target=category_nl_length.replace(" ", "_"),
                 operation="short_to_tag_to_long"
             )
