@@ -151,7 +151,7 @@ class TIPO:
             "required": {
                 "tags": ("STRING", {"default": "", "multiline": True}),
                 "nl_prompt": ("STRING", {"default": "", "multiline": True}),
-                "ban_tags": ("STRING", {"default": "", "multiline": True}),
+                "ban_tags": ("STRING", {"default": "artist name, white background, mosaic censoring, simple background, 1.0, blush stickers, retro phone booth, censored, :d, upper teeth only, no humans", "multiline": True}),
                 "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}),
                 "format": (
                     "STRING",
@@ -309,6 +309,8 @@ class TIPO:
 
         current_seed = seed + 1
         for placeholder, category_tags in wildcard_categories.items():
+            # Ensure ban_tags are applied for each category
+            tipo.BAN_TAGS = black_list
             placeholder_key = placeholder.strip("<|>")
             if not category_tags:
                 final_prompt_parts[placeholder_key] = ""
@@ -386,7 +388,7 @@ class TIPONaturalLanguage:
             "required": {
                 "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}),
                 "tags": ("STRING", {"default": "", "multiline": True, "placeholder": "Overall tags (character, copyright, general...)"}),
-                "ban_tags": ("STRING", {"default": "", "multiline": True}),
+                "ban_tags": ("STRING", {"default": "artist name, white background, mosaic censoring, simple background, 1.0, blush stickers, retro phone booth, censored, :d, upper teeth only, no humans", "multiline": True}),
                 "width": ("INT", {"default": 1024, "max": 16384}),
                 "height": ("INT", {"default": 1024, "max": 16384}),
                 "temperature": ("FLOAT", {"default": 0.6, "step": 0.01, "min": 0.1, "max": 1.5}),
@@ -559,6 +561,8 @@ class TIPONaturalLanguage:
         category_nls = {}
         current_seed = seed + 1
         for name, category_tags_str in wildcard_categories.items():
+            # Ensure ban_tags are applied for each category
+            tipo.BAN_TAGS = black_list
             output_key = name + "_nl"
             if not category_tags_str.strip():
                 category_nls[output_key] = ""
@@ -608,7 +612,7 @@ class TIPONaturalLanguage:
 
 class TIPOOperation:
     # This class remains unchanged.
-    INPUT_TYPES = lambda: { "required": { "tags": ("STRING", {"defaultInput": True, "multiline": True}), "nl_prompt": ("STRING", {"defaultInput": True, "multiline": True}), "ban_tags": ("STRING", {"defaultInput": True, "multiline": True}), "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}), "operation": (sorted(OPERATION_LIST), {"default": sorted(OPERATION_LIST)[0]}), "width": ("INT", {"default": 1024, "max": 16384}), "height": ("INT", {"default": 1024, "max": 16384}), "temperature": ("FLOAT", {"default": 0.5, "step": 0.01}), "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}), "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}), "top_k": ("INT", {"default": 80}), "tag_length": (["very_short", "short", "long", "very_long"], {"default": "long"}), "nl_length": (["very_short", "short", "long", "very_long"], {"default": "long"}), "seed": ("INT", {"default": 1234}), "device": (["cpu", "cuda"], {"default": "cuda"}), }, }
+    INPUT_TYPES = lambda: { "required": { "tags": ("STRING", {"defaultInput": True, "multiline": True}), "nl_prompt": ("STRING", {"defaultInput": True, "multiline": True}), "ban_tags": ("STRING", {"default": "artist name, white background, mosaic censoring, simple background, 1.0, blush stickers, retro phone booth, censored, :d, upper teeth only, no humans", "multiline": True}), "tipo_model": (MODEL_NAME_LIST, {"default": MODEL_NAME_LIST[0]}), "operation": (sorted(OPERATION_LIST), {"default": sorted(OPERATION_LIST)[0]}), "width": ("INT", {"default": 1024, "max": 16384}), "height": ("INT", {"default": 1024, "max": 16384}), "temperature": ("FLOAT", {"default": 0.5, "step": 0.01}), "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}), "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}), "top_k": ("INT", {"default": 80}), "tag_length": (["very_short", "short", "long", "very_long"], {"default": "long"}), "nl_length": (["very_short", "short", "long", "very_long"], {"default": "long"}), "seed": ("INT", {"default": 1234}), "device": (["cpu", "cuda"], {"default": "cuda"}), }, }
     RETURN_TYPES = ("LIST", "LIST")
     RETURN_NAMES = ("full_output", "addon_output")
     FUNCTION = FUNCTION
