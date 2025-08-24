@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import re
 from ..tipo_installer import install_tipo_kgen, install_llama_cpp
@@ -9,40 +10,33 @@ from kgen.executor.tipo import tipo_single_request, tipo_runner
 from kgen.formatter import seperate_tags
 from kgen.logging import logger
 
+# 共通機能を util からインポート
 from . import util
 
 class TIPONaturalLanguage:
+    """
+    Preprocessorからの入力を使用して、文脈に応じた自然言語プロンプトを生成する改修版ノード。
+    UIが簡素化され、NL生成のコア機能に特化しています。
+    """
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
+                # Preprocessorからの単一入力を受け取る
+                "tipo_prompts": ("TIPO_PROMPTS",),
+
+                # NL生成に関する設定は維持
                 "tipo_model": (util.MODEL_NAME_LIST, {"default": util.MODEL_NAME_LIST[0]}),
-                "tags": ("STRING", {"default": "", "multiline": True, "placeholder": "Overall tags (character, copyright, general...)"}),
-                "ban_tags": ("STRING", {"default": "", "multiline": True}),
                 "width": ("INT", {"default": 1024, "max": 16384}),
                 "height": ("INT", {"default": 1024, "max": 16384}),
                 "temperature": ("FLOAT", {"default": 0.6, "step": 0.01, "min": 0.1, "max": 1.5}),
                 "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}),
                 "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}),
                 "top_k": ("INT", {"default": 80}),
-                "overall_nl_length": (
-                    ["very_short", "short", "long", "very_long"],
-                    {"default": "long"},
-                ),
-                "category_nl_length": (
-                    ["very_short", "short", "long", "very_long"],
-                    {"default": "short"},
-                ),
+                "overall_nl_length": (["very_short", "short", "long", "very_long"], {"default": "long"}),
+                "category_nl_length": (["very_short", "short", "long", "very_long"], {"default": "short"}),
                 "seed": ("INT", {"default": 1234, "min": -1, "max": 0xffffffffffffffff}),
                 "device": (["cpu", "cuda"], {"default": "cuda"}),
-            },
-            "optional": {
-                "appearance_tags": ("STRING", {"default": "", "multiline": True}),
-                "clothing_tags": ("STRING", {"default": "", "multiline": True}),
-                "background_tags": ("STRING", {"default": "", "multiline": True}),
-                "pose_emotion_tags": ("STRING", {"default": "", "multiline": True}),
-                "camera_lighting_tags": ("STRING", {"default": "", "multiline": True}),
-                "art_style_tags": ("STRING", {"default": "", "multiline": True}),
             }
         }
 
@@ -81,26 +75,28 @@ class TIPONaturalLanguage:
 
     def execute(
         self,
-        tipo_model: str, tags: str, ban_tags: str, width: int, height: int,
+        tipo_prompts: dict,
+        tipo_model: str,
+        width: int, height: int,
         temperature: float, top_p: float, min_p: float, top_k: int,
-        overall_nl_length: str, category_nl_length: str, seed: int, device: str,
-        appearance_tags: str = "", clothing_tags: str = "", background_tags: str = "",
-        pose_emotion_tags: str = "", camera_lighting_tags: str = "", art_style_tags: str = "",
+        overall_nl_length: str, category_nl_length: str,
+        seed: int, device: str,
     ):
         util.load_tipo_model(tipo_model, device)
+        
+        # --- Preprocessorからのデータを展開 ---
+        tags = tipo_prompts.get("main", {}).get("tags", "")
+        ban_tags = tipo_prompts.get("main", {}).get("ban_tags", "")
+        category_prompts = tipo_prompts.get("categories", {})
         
         aspect_ratio = width / height
         tipo.BAN_TAGS = [t.strip() for t in ban_tags.split(",") if t.strip()]
         if seed == -1:
             seed = int.from_bytes(os.urandom(8), 'big')
 
+        # 全てのタグを収集して全体NLを生成
         all_tags_list = [t.strip() for t in tags.split(',') if t.strip()]
-        wildcard_categories = {
-            "appearance": appearance_tags, "clothing": clothing_tags,
-            "background": background_tags, "pose_emotion": pose_emotion_tags,
-            "camera_lighting": camera_lighting_tags, "art_style": art_style_tags,
-        }
-        for category_tags_str in wildcard_categories.values():
+        for category_tags_str in category_prompts.values():
             all_tags_list.extend([t.strip() for t in category_tags_str.split(',') if t.strip()])
         all_tags_list = list(dict.fromkeys(all_tags_list))
 
@@ -121,9 +117,10 @@ class TIPONaturalLanguage:
             overall_nl = tag_map_overall.get("generated", tag_map_overall.get("extended", ""))
             logger.info(f"Overall NL: {overall_nl[:100]}...")
 
+        # カテゴリ別NLを生成
         category_nls = {}
         current_seed = seed + 1
-        for name, category_tags_str in wildcard_categories.items():
+        for name, category_tags_str in category_prompts.items():
             output_key = name + "_nl"
             if not category_tags_str.strip():
                 category_nls[output_key] = ""
@@ -159,10 +156,10 @@ class TIPONaturalLanguage:
             category_nls.get("camera_lighting_nl", ""), category_nls.get("art_style_nl", ""),
         )
 
-# Add mappings for this node
+# --- ノードのマッピング定義 ---
 NODE_CLASS_MAPPINGS = {
     "TIPONaturalLanguage": TIPONaturalLanguage,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TIPONaturalLanguage": "TIPO Natural Language (Contextual)",
+    "TIPONaturalLanguage": "TIPO Natural Language (Refactored)",
 }
