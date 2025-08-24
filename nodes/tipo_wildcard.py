@@ -1,4 +1,5 @@
-import os
+# -*- coding: utf-8 -*-
+import re  # 修正点: 不要なタグを除去するために正規表現モジュールをインポート
 from ..tipo_installer import install_tipo_kgen, install_llama_cpp
 install_llama_cpp()
 install_tipo_kgen()
@@ -8,16 +9,22 @@ from kgen.executor.tipo import parse_tipo_request, tipo_runner
 from kgen.formatter import seperate_tags, apply_format
 from kgen.logging import logger
 
+# 共通機能を util からインポート
 from . import util
 
 class TIPO:
+    """
+    Preprocessorからの入力を使用して、タグの拡張とフォーマットを行う改修版ノード。
+    UIが簡素化され、プロンプト生成のコア機能に特化しています。
+    """
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "tags": ("STRING", {"default": "", "multiline": True}),
-                "nl_prompt": ("STRING", {"default": "", "multiline": True}),
-                "ban_tags": ("STRING", {"default": "", "multiline": True}),
+                # Preprocessorからの単一入力を受け取る
+                "tipo_prompts": ("TIPO_PROMPTS",),
+                
+                # プロンプト生成に関する設定は維持
                 "tipo_model": (util.MODEL_NAME_LIST, {"default": util.MODEL_NAME_LIST[0]}),
                 "format": (
                     "STRING",
@@ -42,68 +49,54 @@ class TIPO:
                 "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}),
                 "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}),
                 "top_k": ("INT", {"default": 80}),
-                "tag_length": (
-                    ["very_short", "short", "long", "very_long"],
-                    {"default": "long"},
-                ),
-                "nl_length": (
-                    ["very_short", "short", "long", "very_long"],
-                    {"default": "long"},
-                ),
+                "tag_length": (["very_short", "short", "long", "very_long"], {"default": "long"}),
+                "nl_length": (["very_short", "short", "long", "very_long"], {"default": "long"}),
                 "seed": ("INT", {"default": 1234, "min": -1, "max": 0xffffffffffffffff}),
                 "device": (["cpu", "cuda"], {"default": "cuda"}),
-            },
-            "optional": {
-                "appearance_tags": ("STRING", {"default": "", "multiline": True}),
-                "clothing_tags": ("STRING", {"default": "", "multiline": True}),
-                "background_tags": ("STRING", {"default": "", "multiline": True}),
-                "pose_emotion_tags": ("STRING", {"default": "", "multiline": True}),
-                "camera_lighting_tags": ("STRING", {"default": "", "multiline": True}),
-                "art_style_tags": ("STRING", {"default": "", "multiline": True}),
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("prompt", "user_prompt", "unformatted_prompt", "unformatted_user_prompt")
+    RETURN_TYPES = (
+        "STRING", "STRING", "STRING", "STRING",
+        "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",
+    )
+    RETURN_NAMES = (
+        "prompt", "user_prompt", "unformatted_prompt", "unformatted_user_prompt",
+        "appearance_tags", "clothing_tags", "background_tags", 
+        "pose_emotion_tags", "camera_lighting_tags", "art_style_tags",
+    )
     FUNCTION = "execute"
     CATEGORY = "utils/promptgen"
 
     def execute(
         self,
+        tipo_prompts: dict,
         tipo_model: str,
-        tags: str,
-        nl_prompt: str,
-        width: int,
-        height: int,
-        seed: int,
-        tag_length: str,
-        nl_length: str,
-        ban_tags: str,
         format: str,
-        temperature: float,
-        top_p: float,
-        min_p: float,
-        top_k: int,
-        device: str,
-        appearance_tags: str = "",
-        clothing_tags: str = "",
-        background_tags: str = "",
-        pose_emotion_tags: str = "",
-        camera_lighting_tags: str = "",
-        art_style_tags: str = "",
+        width: int, height: int,
+        temperature: float, top_p: float, min_p: float, top_k: int,
+        tag_length: str, nl_length: str,
+        seed: int, device: str,
     ):
-        # Use the utility function to load the model
+        # 修正点: 不要なタグ（例: "1.0", "<|short|>"）を除去するための正規表現パターンを定義
+        invalid_tag_pattern = re.compile(r'^\s*(\d+\.\d+|<\|.*?\|>)\s*$')
+
         util.load_tipo_model(tipo_model, device)
-            
+        
+        # --- Preprocessorからのデータを展開 ---
+        tags = tipo_prompts.get("main", {}).get("tags", "")
+        nl_prompt = tipo_prompts.get("main", {}).get("nl_prompt", "")
+        ban_tags = tipo_prompts.get("main", {}).get("ban_tags", "")
+        category_prompts = tipo_prompts.get("categories", {})
+        
         aspect_ratio = width / height
-        black_list = [t.strip() for t in ban_tags.split(",") if t.strip()]
-        tipo.BAN_TAGS = black_list
+        tipo.BAN_TAGS = [t.strip() for t in ban_tags.split(",") if t.strip()]
         
         final_prompt_parts = {}
         all_original_tags_list = []
         all_addon_tags_list = []
 
-        # Part 1: Process main 'tags' and 'nl_prompt'
+        # Part 1: メインの 'tags' と 'nl_prompt' を処理
         if tags.strip() or nl_prompt.strip():
             prompt_parse_strength = util.parse_prompt_attention(tags)
             nl_prompt_parse_strength = util.parse_prompt_attention(nl_prompt)
@@ -134,8 +127,12 @@ class TIPO:
                 temperature=temperature, seed=seed, top_p=top_p, min_p=min_p, top_k=top_k,
             )
  
+            # 修正点: 'general' カテゴリから不要なタグを正規表現でフィルタリング
             if 'general' in tag_map_main and isinstance(tag_map_main['general'], list):
-                tag_map_main['general'] = [tag for tag in tag_map_main['general'] if tag.strip() != "1.0"]
+                tag_map_main['general'] = [
+                    tag for tag in tag_map_main['general'] 
+                    if not invalid_tag_pattern.match(tag)
+                ]
 
             for key, tag_list in tag_map_main.items():
                 if isinstance(tag_list, list):
@@ -150,24 +147,18 @@ class TIPO:
                         if tag not in main_original_tags_set:
                             all_addon_tags_list.append(tag)
 
-        # Part 2: Process each wildcard category individually
-        wildcard_categories = {
-            "<|wildcard_appearance|>": appearance_tags.strip(),
-            "<|wildcard_clothing|>": clothing_tags.strip(),
-            "<|wildcard_background|>": background_tags.strip(),
-            "<|wildcard_pose_emotion|>": pose_emotion_tags.strip(),
-            "<|wildcard_camera_lighting|>": camera_lighting_tags.strip(),
-            "<|wildcard_art_style|>": art_style_tags.strip(),
-        }
-
+        # Part 2: 各カテゴリを個別に処理
+        category_outputs = {}
         current_seed = seed + 1
-        for placeholder, category_tags in wildcard_categories.items():
-            placeholder_key = placeholder.strip("<|>")
-            if not category_tags:
+        for category_name, category_tags in category_prompts.items():
+            placeholder_key = f"wildcard_{category_name}"
+            
+            if not category_tags.strip():
                 final_prompt_parts[placeholder_key] = ""
+                category_outputs[placeholder_key] = ""
                 continue
 
-            logger.info(f"TIPO is extending category: {placeholder}")
+            logger.info(f"TIPO is extending category: <|{placeholder_key}|>")
             cat_all_tags = [t.strip() for t in category_tags.split(',') if t.strip()]
             all_original_tags_list.extend(cat_all_tags)
 
@@ -189,24 +180,24 @@ class TIPO:
             for tag_list in cat_tag_map.values():
                  if isinstance(tag_list, list):
                     for tag in tag_list:
-                        if tag not in original_tags_set:
+                        # 修正点: カテゴリ別に追加されたタグも同様にフィルタリング
+                        if tag not in original_tags_set and not invalid_tag_pattern.match(tag):
                             addon_tags.append(tag)
             
             combined_tags_list = cat_all_tags + addon_tags
             unique_tags_list = list(dict.fromkeys(combined_tags_list))
             all_addon_tags_list.extend(addon_tags)
 
-            final_prompt_parts[placeholder_key] = ", ".join(unique_tags_list)
+            processed_category_tags = ", ".join(unique_tags_list)
+            final_prompt_parts[placeholder_key] = processed_category_tags
+            category_outputs[placeholder_key] = processed_category_tags
             current_seed += 1
 
-        # Part 3: Final Assembly
+        # Part 3: 最終的な組み立てと他の戻り値の再構築
         final_prompt = apply_format(final_prompt_parts, format)
-        
         final_tags_list = [tag.strip() for tag in final_prompt.split(',') if tag.strip()]
-        unique_final_tags_list = list(dict.fromkeys(final_tags_list))
-        final_prompt = ", ".join(unique_final_tags_list)
+        final_prompt = ", ".join(list(dict.fromkeys(final_tags_list)))
 
-        # Part 4: Reconstruct other return values
         all_original_tags_str = ", ".join(list(dict.fromkeys(all_original_tags_list)))
         unformatted_addon_tags = ", ".join(list(dict.fromkeys(all_addon_tags_list)))
         unformatted_prompt_by_tipo = (all_original_tags_str + ", " + unformatted_addon_tags).strip(", ")
@@ -214,20 +205,28 @@ class TIPO:
         user_prompt_parts = seperate_tags(all_original_tags_list)
         formatted_prompt_by_user = apply_format(user_prompt_parts, format)
         
-        for placeholder, original_tags in wildcard_categories.items():
-            formatted_prompt_by_user = formatted_prompt_by_user.replace(placeholder, original_tags)
+        for category_name, original_tags in category_prompts.items():
+            formatted_placeholder = f"<|wildcard_{category_name}|>"
+            formatted_prompt_by_user = formatted_prompt_by_user.replace(formatted_placeholder, original_tags)
         
         user_tags_list = [tag.strip() for tag in formatted_prompt_by_user.split(',') if tag.strip()]
         formatted_prompt_by_user = ", ".join(list(dict.fromkeys(user_tags_list)))
-
         unformatted_prompt_by_user = all_original_tags_str + "\n" + nl_prompt
         
-        return (final_prompt, formatted_prompt_by_user, unformatted_prompt_by_tipo, unformatted_prompt_by_user)
+        return (
+            final_prompt, formatted_prompt_by_user, unformatted_prompt_by_tipo, unformatted_prompt_by_user,
+            category_outputs.get("wildcard_appearance", ""),
+            category_outputs.get("wildcard_clothing", ""),
+            category_outputs.get("wildcard_background", ""),
+            category_outputs.get("wildcard_pose_emotion", ""),
+            category_outputs.get("wildcard_camera_lighting", ""),
+            category_outputs.get("wildcard_art_style", ""),
+        )
 
-# Add mappings for this node
+# --- ノードのマッピング定義 ---
 NODE_CLASS_MAPPINGS = {
     "TIPO": TIPO,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TIPO": "TIPO (Wildcard Enabled)",
+    "TIPO": "TIPO Wildcard (Refactored)",
 }
