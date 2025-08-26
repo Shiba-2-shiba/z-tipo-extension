@@ -30,16 +30,19 @@ class TIPO:
                     "STRING",
                     {
                         "default": """<|special|>, 
-<|characters|>, <|copyrights|>, 
+<|characters|>, 
+<|copyrights|>, 
 <|artist|>, 
-
-<|wildcard_appearance|>, <|wildcard_clothing|>,
-<|wildcard_pose_emotion|>, <|wildcard_background|>,
-<|wildcard_camera_lighting|>, <|wildcard_art_style|>,
-
 <|general|>,
-
-<|quality|>, <|meta|>, <|rating|>""",
+<|wildcard_appearance|>, 
+<|wildcard_clothing|>,
+<|wildcard_pose_emotion|>, 
+<|wildcard_background|>,
+<|wildcard_camera_lighting|>, 
+<|wildcard_art_style|>,
+<|quality|>, 
+<|meta|>, 
+<|rating|>""",
                         "multiline": True,
                     },
                 ),
@@ -234,3 +237,4 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TIPO": "TIPO Wildcard (Refactored)",
 }
+
