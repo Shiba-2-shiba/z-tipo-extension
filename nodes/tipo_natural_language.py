@@ -90,7 +90,11 @@ class TIPONaturalLanguage:
         category_prompts = tipo_prompts.get("categories", {})
         
         aspect_ratio = width / height
-        tipo.BAN_TAGS = [t.strip() for t in ban_tags.split(",") if t.strip()]
+        
+        # --- 修正点 1: ban_tagsをリストとして変数に保持 ---
+        black_list = [t.strip() for t in ban_tags.split(",") if t.strip()]
+        tipo.BAN_TAGS = black_list
+
         if seed == -1:
             seed = int.from_bytes(os.urandom(8), 'big')
 
@@ -126,6 +130,9 @@ class TIPONaturalLanguage:
                 category_nls[output_key] = ""
                 continue
             
+            # --- 修正点 2: ループ内で毎回ban_tagsを再設定 ---
+            tipo.BAN_TAGS = black_list
+
             logger.info(f"Generating contextual NL for category: {name}")
             cat_tags = [t.strip() for t in category_tags_str.split(',') if t.strip()]
             cat_org_tag_map = seperate_tags(cat_tags)
