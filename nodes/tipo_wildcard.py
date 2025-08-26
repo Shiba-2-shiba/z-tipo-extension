@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import re  # 修正点: 不要なタグを除去するために正規表現モジュールをインポート
+import re
 from ..tipo_installer import install_tipo_kgen, install_llama_cpp
 install_llama_cpp()
 install_tipo_kgen()
@@ -78,7 +78,7 @@ class TIPO:
         tag_length: str, nl_length: str,
         seed: int, device: str,
     ):
-        # 修正点: 不要なタグ（例: "1.0", "<|short|>"）を除去するための正規表現パターンを定義
+        # 不要なタグ（例: "1.0", "<|short|>"）を除去するための正規表現パターン
         invalid_tag_pattern = re.compile(r'^\s*(\d+\.\d+|<\|.*?\|>)\s*$')
 
         util.load_tipo_model(tipo_model, device)
@@ -90,7 +90,10 @@ class TIPO:
         category_prompts = tipo_prompts.get("categories", {})
         
         aspect_ratio = width / height
-        tipo.BAN_TAGS = [t.strip() for t in ban_tags.split(",") if t.strip()]
+        
+        # --- 修正点 1: ban_tagsをリストとして変数に保持 ---
+        black_list = [t.strip() for t in ban_tags.split(",") if t.strip()]
+        tipo.BAN_TAGS = black_list
         
         final_prompt_parts = {}
         all_original_tags_list = []
@@ -127,7 +130,6 @@ class TIPO:
                 temperature=temperature, seed=seed, top_p=top_p, min_p=min_p, top_k=top_k,
             )
  
-            # 修正点: 'general' カテゴリから不要なタグを正規表現でフィルタリング
             if 'general' in tag_map_main and isinstance(tag_map_main['general'], list):
                 tag_map_main['general'] = [
                     tag for tag in tag_map_main['general'] 
@@ -158,6 +160,9 @@ class TIPO:
                 category_outputs[placeholder_key] = ""
                 continue
 
+            # --- 修正点 2: ループ内で毎回ban_tagsを再設定 ---
+            tipo.BAN_TAGS = black_list
+
             logger.info(f"TIPO is extending category: <|{placeholder_key}|>")
             cat_all_tags = [t.strip() for t in category_tags.split(',') if t.strip()]
             all_original_tags_list.extend(cat_all_tags)
@@ -180,7 +185,6 @@ class TIPO:
             for tag_list in cat_tag_map.values():
                  if isinstance(tag_list, list):
                     for tag in tag_list:
-                        # 修正点: カテゴリ別に追加されたタグも同様にフィルタリング
                         if tag not in original_tags_set and not invalid_tag_pattern.match(tag):
                             addon_tags.append(tag)
             
