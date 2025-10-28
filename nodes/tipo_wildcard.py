@@ -16,6 +16,7 @@ class TIPOWildcard:
     """
     Preprocessorからのカテゴリ別タグ入力を受け取り、それぞれを個別に拡張して出力するノード。
     「メイン」「外見」「ポーズ/表情」を結合して処理し、重複を削減します。
+    ★ 改善版: AIによる追加タグを含めた全タグを最適配置します。
     """
     @classmethod
     def INPUT_TYPES(s):
@@ -23,7 +24,6 @@ class TIPOWildcard:
             "required": {
                 "tipo_prompts": ("TIPO_PROMPTS",),
                 "tipo_model": (util.MODEL_NAME_LIST, {"default": util.MODEL_NAME_LIST[0]}),
-                # ★ 変更点: デフォルトのフォーマットを新しい出力に合わせて修正
                 "format": (
                     "STRING",
                     {
@@ -48,7 +48,6 @@ class TIPOWildcard:
             }
         }
 
-    # ★ 変更点: 出力を5つに削減
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING",)
     RETURN_NAMES = (
         "final_prompt",
@@ -60,43 +59,41 @@ class TIPOWildcard:
     FUNCTION = "execute"
     CATEGORY = "TIPO"
 
-    def _process_category(self, tags_list, aspect_ratio, tag_length, temperature, seed, top_p, min_p, top_k, black_list):
+    # ★ 変更点: 関数名をより分かりやすくし、戻り値をTIPOのパース結果全体から抽出したクリーンなタグリストに変更
+    def _get_expanded_tags(self, tags_list, aspect_ratio, tag_length, temperature, seed, top_p, min_p, top_k, black_list):
         """
-        指定されたタグリストをKgenライブラリの仕様に沿って適切に拡張する共通関数
+        指定されたタグリストをTIPOで拡張し、クリーンなタグリストを返す共通関数
         """
         if not tags_list:
-            return [], []
+            return []
 
         tipo.BAN_TAGS = black_list
         org_tag_map = seperate_tags(tags_list)
+        
         meta, operations, general, _ = tipo_single_request(
             org_tag_map, 
             nl_prompt="",
             tag_length_target=tag_length,
             operation="short_to_tag"
         )
-
-        if not general and not any(org_tag_map.values()):
-            logger.warning(f"No processable tags found for input: {tags_list}. Returning original tags.")
-            return tags_list, []
         
         meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
-        tag_map, _ = tipo_runner(
+        
+        # tipo_runnerを実行し、パース済みの辞書結果を取得
+        parsed_result, _ = tipo_runner(
             meta, operations, general, "",
             temperature=temperature, seed=seed, top_p=top_p, min_p=min_p, top_k=top_k
         )
 
-        original_tags_set = set(tags_list)
-        addon_tags = []
-        for category, generated_tags in tag_map.items():
-            if isinstance(generated_tags, list):
-                for tag in generated_tags:
-                    tag_stripped = tag.strip()
-                    if tag_stripped and tag_stripped not in original_tags_set:
-                        addon_tags.append(tag_stripped)
+        # ★ 変更点: パース結果から'general'と'special'タグを抽出し、結合する
+        # これにより、プロンプト構築時の命令（aspect_ratioなど）が混入するのを防ぐ
+        expanded_tags = parsed_result.get("special", []) + parsed_result.get("general", [])
         
-        final_addon_tags = [tag for tag in list(dict.fromkeys(addon_tags)) if tag and tag not in black_list]
-        return final_addon_tags
+        # 重複を除去し、BANリストにないものだけを返す
+        unique_tags = list(dict.fromkeys(expanded_tags))
+        final_tags = [tag for tag in unique_tags if tag and tag not in black_list]
+
+        return final_tags
 
     def execute(
         self,
@@ -117,29 +114,26 @@ class TIPOWildcard:
         aspect_ratio = width / height
         black_list = [t.strip() for t in ban_tags.split(",") if t.strip()]
         
-        all_original_tags_list = []
-        all_addon_tags_list = []
-        final_prompt_parts = {}
+        # ★ 変更点: 全てのタグを保持するリストを準備
+        all_processed_tags_list = []
         category_outputs = {}
         current_seed = seed
 
-        # --- Part 1: ★★★ メイン、外見、ポーズ/表情を結合して処理 ★★★
+        # --- Part 1: メイン、外見、ポーズ/表情を結合して処理 ---
         logger.info("TIPO is processing: <|wildcard_character_pose|>")
         appearance_tags_str = category_prompts.pop("appearance", "")
         pose_emotion_tags_str = category_prompts.pop("pose_emotion", "")
         
         combined_main_tags_str = ", ".join(filter(None, [main_tags_str, appearance_tags_str, pose_emotion_tags_str]))
         main_tags_list = [t.strip() for t in combined_main_tags_str.split(',') if t.strip()]
-        all_original_tags_list.extend(main_tags_list)
 
-        addon_main_tags = self._process_category(
+        # ★ 変更点: クリーンなタグリストを取得
+        processed_main_tags = self._get_expanded_tags(
             main_tags_list, aspect_ratio, tag_length, temperature, current_seed, top_p, min_p, top_k, black_list
         )
-        all_addon_tags_list.extend(addon_main_tags)
+        all_processed_tags_list.extend(processed_main_tags)
         
-        processed_main_tags = main_tags_list + addon_main_tags
-        main_output_str = ", ".join(list(dict.fromkeys(processed_main_tags)))
-        final_prompt_parts["wildcard_character_pose"] = main_output_str
+        main_output_str = ", ".join(processed_main_tags)
         category_outputs["wildcard_character_pose"] = main_output_str
         current_seed += 1
         
@@ -149,37 +143,46 @@ class TIPOWildcard:
             logger.info(f"TIPO is processing: <|{placeholder_key}|>")
 
             if not category_tags_str.strip():
-                final_prompt_parts[placeholder_key] = ""
                 category_outputs[placeholder_key] = ""
                 continue
 
             cat_tags_list = [t.strip() for t in category_tags_str.split(',') if t.strip()]
-            all_original_tags_list.extend(cat_tags_list)
 
-            addon_cat_tags = self._process_category(
+            processed_cat_tags = self._get_expanded_tags(
                 cat_tags_list, aspect_ratio, tag_length, temperature, current_seed, top_p, min_p, top_k, black_list
             )
-            all_addon_tags_list.extend(addon_cat_tags)
+            all_processed_tags_list.extend(processed_cat_tags)
 
-            processed_cat_tags = cat_tags_list + addon_cat_tags
-            cat_output_str = ", ".join(list(dict.fromkeys(processed_cat_tags)))
-            final_prompt_parts[placeholder_key] = cat_output_str
+            cat_output_str = ", ".join(processed_cat_tags)
             category_outputs[placeholder_key] = cat_output_str
             current_seed += 1
 
-        # --- Part 3: 最終的な組み立て ---
-        org_tags_for_format = seperate_tags(all_original_tags_list)
-        for key, value in org_tags_for_format.items():
-            if f"<|{key}|>" in format:
-                 final_prompt_parts[key] = ", ".join(value)
+        # ★★★ 変更点: 全てのタグを再分類し、最終プロンプトを構築 ★★★
+        # これが「効果的な配置」を実現する部分
+        final_prompt_parts = seperate_tags(all_processed_tags_list)
 
+        # ワイルドカード部分を、処理済みの各カテゴリ文字列で上書き
+        final_prompt_parts["wildcard_character_pose"] = category_outputs.get("wildcard_character_pose", "")
+        final_prompt_parts["wildcard_clothing"] = category_outputs.get("wildcard_clothing", "")
+        final_prompt_parts["wildcard_background"] = category_outputs.get("wildcard_background", "")
+        
+        # 最終的なプロンプトをフォーマットに従って生成
         final_prompt = apply_format(final_prompt_parts, format)
         final_tags_list = [tag.strip() for tag in final_prompt.split(',') if tag.strip()]
         final_tags_list = [tag for tag in final_tags_list if tag not in black_list]
         final_prompt = ", ".join(list(dict.fromkeys(final_tags_list)))
         
-        all_original_tags_str = ", ".join(list(dict.fromkeys(all_original_tags_list)))
-        unformatted_addon_tags = ", ".join(list(dict.fromkeys(all_addon_tags_list)))
+        # unformatted_prompt_by_tipoの再計算
+        # 元々の入力タグと、AIによって追加されたタグを区別
+        original_tags_set = set()
+        original_tags_set.update([t.strip() for t in main_tags_str.split(',') if t.strip()])
+        for cat_tags in tipo_prompts.get("categories", {}).values():
+            original_tags_set.update([t.strip() for t in cat_tags.split(',') if t.strip()])
+        
+        addon_tags = [tag for tag in all_processed_tags_list if tag not in original_tags_set]
+        
+        all_original_tags_str = ", ".join(list(dict.fromkeys(sorted(list(original_tags_set)))))
+        unformatted_addon_tags = ", ".join(list(dict.fromkeys(addon_tags)))
         unformatted_prompt_by_tipo = (all_original_tags_str + ", " + unformatted_addon_tags).strip(", ")
         
         return (
