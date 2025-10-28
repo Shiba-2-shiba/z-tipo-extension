@@ -69,7 +69,7 @@ class TIPOWildcard:
     FUNCTION = "execute"
     CATEGORY = "TIPO"
 
-def _process_category(self, tags_list, aspect_ratio, tag_length, temperature, seed, top_p, min_p, top_k, black_list):
+    def _process_category(self, tags_list, aspect_ratio, tag_length, temperature, seed, top_p, min_p, top_k, black_list):
         """
         [改善版] 指定されたタグリストをKgenライブラリの仕様に沿って適切に拡張する共通関数
         """
@@ -247,4 +247,5 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TIPOWildcard": "TIPO Wildcard (Refactored)",
 }
+
 
