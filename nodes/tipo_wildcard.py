@@ -412,7 +412,6 @@ class TIPO:
                 max_new_tokens=96,
                 repetition_penalty=1.1,
                 device=device,
-                replace_underscore=True,
                 generate_extra_tags_for_output=True,
                 generate_extra_text_for_output=False,
                 output_general=True,
@@ -501,4 +500,5 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TIPO": "TIPO Wildcard (Refactored)",
 }
+
 
