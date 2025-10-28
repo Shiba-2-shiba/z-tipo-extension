@@ -69,42 +69,65 @@ class TIPOWildcard:
     FUNCTION = "execute"
     CATEGORY = "TIPO"
 
-    def _process_category(self, tags_list, aspect_ratio, tag_length, temperature, seed, top_p, min_p, top_k, black_list):
-        """指定されたタグリストをTIPOで拡張する共通関数"""
+def _process_category(self, tags_list, aspect_ratio, tag_length, temperature, seed, top_p, min_p, top_k, black_list):
+        """
+        [改善版] 指定されたタグリストをKgenライブラリの仕様に沿って適切に拡張する共通関数
+        """
         if not tags_list:
             return [], []
 
+        # 1. BANタグをライブラリに設定
         tipo.BAN_TAGS = black_list
+
+        # 2. ★★★ ライブラリの formatter を使用してタグをカテゴリ分けする ★★★
+        # これが最も重要な改善点です。
         org_tag_map = seperate_tags(tags_list)
-        
+
+        # 3. カテゴリ分けされたタグマップを基に、AIへのリクエストを生成
         meta, operations, general, _ = tipo_single_request(
-            org_tag_map, nl_prompt="", 
+            org_tag_map, 
+            nl_prompt="",  # このノードではNLは使用しない
             tag_length_target=tag_length,
-            operation="short_to_tag" # タグ拡張のための操作を指定
+            operation="short_to_tag"  # タグ拡張の操作を指定
         )
+
+        # 4. 処理対象のタグがない場合は、早期にリターン（エラー防止）
+        if not general and not any(org_tag_map.values()):
+            logger.warning(f"No processable tags found for input: {tags_list}. Returning original tags.")
+            return tags_list, []
+        
+        # 5. メタ情報にアスペクト比を追加
         meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
         
+        # 6. AIモデルを実行してタグを拡張
         tag_map, _ = tipo_runner(
             meta, operations, general, "",
             temperature=temperature, seed=seed, top_p=top_p, min_p=min_p, top_k=top_k
         )
 
+        # 7. 結果を統合し、クリーンアップする
         original_tags_set = set(tags_list)
+        combined_tags = list(tags_list)
         addon_tags = []
-        combined_tags = list(tags_list) # 元のタグを維持
 
-        for cate, content in tag_map.items():
-            if isinstance(content, list):
-                for tag in content:
-                    if tag not in original_tags_set:
-                        addon_tags.append(tag)
-                        combined_tags.append(tag)
+        # tag_map には拡張されたタグがカテゴリ別に格納されている
+        for category, generated_tags in tag_map.items():
+            if isinstance(generated_tags, list):
+                for tag in generated_tags:
+                    tag_stripped = tag.strip()
+                    if tag_stripped and tag_stripped not in original_tags_set:
+                        # 元のタグになかったものを追加タグとして記録
+                        addon_tags.append(tag_stripped)
+                        combined_tags.append(tag_stripped)
         
-        # BANタグ除去と重複除去
-        final_tags = list(dict.fromkeys(combined_tags))
-        final_tags = [tag for tag in final_tags if tag not in black_list]
+        # 8. 最終的なフィルタリング（重複除去とBANタグ除去）
+        unique_tags = list(dict.fromkeys(combined_tags))
+        final_tags = [tag for tag in unique_tags if tag and tag not in black_list]
+        
+        unique_addon_tags = list(dict.fromkeys(addon_tags))
+        final_addon_tags = [tag for tag in unique_addon_tags if tag and tag not in black_list]
 
-        return final_tags, addon_tags
+        return final_tags, final_addon_tags
 
     def execute(
         self,
@@ -224,3 +247,4 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TIPOWildcard": "TIPO Wildcard (Refactored)",
 }
+
