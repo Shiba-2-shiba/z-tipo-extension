@@ -34,42 +34,41 @@ class TIPO:
 <|copyrights|>, 
 <|artist|>, 
 <|general|>,
-<|wildcard_appearance|>, 
-<|wildcard_clothing|>,
+<|wildcard_clothing|>, 
+<|wildcard_background|>, 
 <|wildcard_pose_emotion|>, 
-<|wildcard_background|>,
 <|wildcard_camera_lighting|>, 
-<|wildcard_art_style|>,
-<|quality|>, 
-<|meta|>, 
-<|rating|>""",
+<|wildcard_art_style|>""",
                         "multiline": True,
                     },
                 ),
-                "width": ("INT", {"default": 1024, "max": 16384}),
-                "height": ("INT", {"default": 1024, "max": 16384}),
-                "temperature": ("FLOAT", {"default": 0.5, "step": 0.01}),
-                "top_p": ("FLOAT", {"default": 0.95, "step": 0.01}),
-                "min_p": ("FLOAT", {"default": 0.05, "step": 0.01}),
-                "top_k": ("INT", {"default": 80}),
-                "tag_length": (["very_short", "short", "long", "very_long"], {"default": "long"}),
-                "nl_length": (["very_short", "short", "long", "very_long"], {"default": "long"}),
-                "seed": ("INT", {"default": 1234, "min": -1, "max": 0xffffffffffffffff}),
-                "device": (["cpu", "cuda"], {"default": "cuda"}),
+                "width": ("INT", {"default": 832, "min": 256, "max": 2048, "step": 8}),
+                "height": ("INT", {"default": 1216, "min": 256, "max": 2048, "step": 8}),
+                "temperature": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 2.0, "step": 0.05}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "min_p": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "top_k": ("INT", {"default": 40, "min": 0, "max": 1000, "step": 1}),
+                "tag_length": ("STRING", {"default": "medium"}),
+                "nl_length": ("STRING", {"default": "2 sentences"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0x7FFFFFFF}),
+                "device": ("STRING", {"default": "auto"}),
             }
         }
 
-    RETURN_TYPES = (
-        "STRING", "STRING", "STRING", "STRING",
-        "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",
-    )
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",)
     RETURN_NAMES = (
-        "prompt", "user_prompt", "unformatted_prompt", "unformatted_user_prompt",
-        "appearance_tags", "clothing_tags", "background_tags", 
-        "pose_emotion_tags", "camera_lighting_tags", "art_style_tags",
+        "final_prompt",
+        "formatted_prompt_by_user",
+        "unformatted_prompt_by_tipo",
+        "main_processed",
+        "wildcard_clothing",
+        "wildcard_background",
+        "wildcard_pose_emotion",
+        "wildcard_camera_lighting",
+        "wildcard_art_style",
     )
     FUNCTION = "execute"
-    CATEGORY = "utils/promptgen"
+    CATEGORY = "TIPO"
 
     def execute(
         self,
@@ -106,24 +105,146 @@ class TIPO:
         if tags.strip() or nl_prompt.strip():
             prompt_parse_strength = util.parse_prompt_attention(tags)
             nl_prompt_parse_strength = util.parse_prompt_attention(nl_prompt)
-            nl_prompt_processed = "".join(part for part, strength in nl_prompt_parse_strength)
-            strength_map_nl = [item for item in nl_prompt_parse_strength if item[1] != 1.0]
 
-            main_all_tags = []
-            strength_map = {}
-            for part, strength in prompt_parse_strength:
-                part_tags = [t.strip() for t in part.strip().split(",") if t.strip()]
-                main_all_tags.extend(part_tags)
-                if strength != 1.0:
-                    for tag in part_tags:
-                        strength_map[tag] = strength
+            strength_map = { p[0].strip(): p[1] for p in prompt_parse_strength }
+            strength_map_nl = [(p[0].strip(), p[1]) for p in nl_prompt_parse_strength if p[0] != "BREAK"]
+
+            main_all_tags = [p[0].strip() for p in prompt_parse_strength if p[0] and p[0] != "BREAK"]
             all_original_tags_list.extend(main_all_tags)
 
-            org_tag_map = seperate_tags(main_all_tags)
-            meta, operations, general, _ = parse_tipo_request(
-                org_tag_map, nl_prompt_processed,
-                tag_length_target=tag_length.replace(" ", "_"),
-                nl_length_target=nl_length.replace(" ", "_"),
+            meta, operations, general, nl_prompt_processed = parse_tipo_request(
+                format, main_all_tags, aspect_ratio,
+                tagtop_replace_underscore=True,
+                valid_only=True,
+                lowercase=True,
+                general_by="regex",
+                seperate_by=",",
+                seperate_space=True,
+                unify_space=True,
+                remove_whitespace=True,
+                check_edge_space=True,
+                tag_to_replace=main_all_tags,
+                escape_text=True,
+                merge_general=True,
+                tag_length=tag_length,
+                nl_length=nl_length,
+                generate_nl_prompt=nl_prompt.strip() != "",
+                remove_nl_tags=True,
+                text_to_replace=nl_prompt_processed if nl_prompt else "",
+                lowercase_nl=True,
+                tagtop_replace_space=True,
+                texttop_replace_space=True,
+                texttop_to_lowercase=True,
+                merge_nl_prompt=True,
+                replace_text_to_single_space=True,
+                tagtop_replace_space_with_underscore=False,
+                texttop_replace_space_with_underscore=False,
+                generate_extra_tags=("<|extended|>" in format or "<|special|>" in format),
+                escape_general=True,
+                remove_duplicate=True,
+                remove_empty=True,
+                replace_space=True,
+                replace_underscore=True,
+                output_formatter=seperate_tags,
+                post_formatter=apply_format,
+                post_format_text_replace_underscore=True,
+                meta_data={
+                    "length": tag_length,
+                    "nl_length": nl_length,
+                    "replace_underscore": True,
+                    "replace_space": True,
+                },
+                tagtop=main_all_tags,
+                texttop=nl_prompt,
+                tagtop_replace_space_for_comma=True,
+                texttop_replace_space_for_comma=True,
+                tagtop_replace_space_with_underscore_for_comma=True,
+                texttop_replace_space_with_underscore_for_comma=True,
+                lowercase_general=True,
+                replace_general_space_with_underscore=True,
+                replace_general_space=True,
+                replace_texttop_space_for_comma=False,
+                replace_tagtop_space_for_comma=False,
+                general_by_tagtop=True,
+                general_limit=256,
+                seed=seed,
+                temperature=temperature,
+                top_p=top_p,
+                min_p=min_p,
+                top_k=top_k,
+                length_scale=1.0,
+                texttop_length_scale=1.0,
+                tagtop_length_scale=1.0,
+                general_length_scale=1.0,
+                smart_tagtop=True,
+                texttop_replace_space_for_escape=True,
+                replace_texttop_space_for_escape=True,
+                replace_tagtop_space_for_escape=True,
+                tagtop_replace_space_with_underscore_for_escape=True,
+                operations=operations,
+                lowercase_special=True,
+                lowercase_characters=True,
+                lowercase_copyrights=True,
+                lowercase_artist=True,
+                lowercase_general_category=True,
+                lowercase_wildcard=True,
+                remove_wildcard_duplicate=True,
+                remove_special_duplicate=True,
+                remove_characters_duplicate=True,
+                remove_copyrights_duplicate=True,
+                remove_artist_duplicate=True,
+                remove_general_duplicate=True,
+                remove_duplicate_tags=True,
+                remove_duplicate_text=True,
+                replace_space_with_underscore=False,
+                replace_space_with_underscore_for_escape=True,
+                tagtop_to_lowercase=True,
+                texttop_to_lowercase=True,
+                output_format_replace_space_with_underscore=True,
+                output_format_replace_space=True,
+                generated_text_replace_space=True,
+                generated_text_replace_space_with_underscore=True,
+                output_format_lowercase=True,
+                output_format_escape=True,
+                output_format_replace_space_with_single_space=True,
+                output_format_replace_underscore=True,
+                texttop_split_by_comma=True,
+                tagtop_split_by_comma=True,
+                generated_text_split_by_comma=True,
+                generated_text_split_by_comma_for_escape=True,
+                output_format_replace_space_with_comma=True,
+                merge_texttop=True,
+                merge_tagtop=True,
+                allow_multiple=True,
+                replace_comma_with_space=True,
+                tagtop_strip_space=True,
+                texttop_strip_space=True,
+                texttop_replace_commas=True,
+                tagtop_replace_commas=True,
+                # ここからメタ情報
+                meta={
+                    "aspect_ratio": f"{aspect_ratio:.1f}",
+                    "seed": seed,
+                    "temperature": temperature,
+                },
+                # 生成オプション
+                max_new_tokens=128,
+                repetition_penalty=1.1,
+                device=device,
+                replace_underscore=True,
+                generate_extra_tags_for_output=True,
+                generate_extra_text_for_output=True,
+                output_general=True,
+                output_special=True,
+                output_characters=True,
+                output_copyrights=True,
+                output_artist=True,
+                generate_extra_wildcard=True,
+                tagtop_replace_space_with_underscore_for_output=True,
+                texttop_replace_space_with_underscore_for_output=True,
+                tagtop_replace_underscore_with_space=False,
+                texttop_replace_underscore_with_space=False,
+                generate_extra_prompt=True,
                 generate_extra_nl_prompt=("<|extended|>" in format or "<|generated|>" in format)
             )
             meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
@@ -141,7 +262,10 @@ class TIPO:
 
             for key, tag_list in tag_map_main.items():
                 if isinstance(tag_list, list):
-                    tag_map_main[key] = list(dict.fromkeys(tag_list))
+                    tag_list = list(dict.fromkeys(tag_list))
+                    # ★ ban除去を追加
+                    tag_list = util.filter_banned_tags(tag_list, black_list)
+                    tag_map_main[key] = tag_list
 
             final_prompt_parts = util.apply_strength(tag_map_main, strength_map, strength_map_nl)
 
@@ -157,7 +281,7 @@ class TIPO:
         current_seed = seed + 1
         for category_name, category_tags in category_prompts.items():
             placeholder_key = f"wildcard_{category_name}"
-            
+
             if not category_tags.strip():
                 final_prompt_parts[placeholder_key] = ""
                 category_outputs[placeholder_key] = ""
@@ -168,22 +292,162 @@ class TIPO:
 
             logger.info(f"TIPO is extending category: <|{placeholder_key}|>")
             cat_all_tags = [t.strip() for t in category_tags.split(',') if t.strip()]
-            all_original_tags_list.extend(cat_all_tags)
+            original_tags_set = set(cat_all_tags)
 
-            cat_org_tag_map = seperate_tags(cat_all_tags)
-            
-            cat_meta, cat_operations, cat_general, _ = parse_tipo_request(
-                cat_org_tag_map, "", tag_length_target=tag_length.replace(" ", "_"),
-                nl_length_target="very_short", generate_extra_nl_prompt=False,
+            # 各カテゴリ用の meta を再構築
+            meta, operations, general, nl_prompt_processed = parse_tipo_request(
+                format, cat_all_tags, aspect_ratio,
+                tagtop_replace_underscore=True,
+                valid_only=True,
+                lowercase=True,
+                general_by="regex",
+                seperate_by=",",
+                seperate_space=True,
+                unify_space=True,
+                remove_whitespace=True,
+                check_edge_space=True,
+                tag_to_replace=cat_all_tags,
+                escape_text=True,
+                merge_general=True,
+                tag_length=tag_length,
+                nl_length=nl_length,
+                generate_nl_prompt=False,
+                remove_nl_tags=True,
+                text_to_replace="",
+                lowercase_nl=True,
+                tagtop_replace_space=True,
+                texttop_replace_space=True,
+                texttop_to_lowercase=True,
+                merge_nl_prompt=False,
+                replace_text_to_single_space=True,
+                tagtop_replace_space_with_underscore=False,
+                texttop_replace_space_with_underscore=False,
+                generate_extra_tags=("<|extended|>" in format or "<|special|>" in format),
+                escape_general=True,
+                remove_duplicate=True,
+                remove_empty=True,
+                replace_space=True,
+                replace_underscore=True,
+                output_formatter=seperate_tags,
+                post_formatter=apply_format,
+                post_format_text_replace_underscore=True,
+                meta_data={
+                    "length": tag_length,
+                    "nl_length": nl_length,
+                    "replace_underscore": True,
+                    "replace_space": True,
+                },
+                tagtop=cat_all_tags,
+                texttop="",
+                tagtop_replace_space_for_comma=True,
+                texttop_replace_space_for_comma=True,
+                tagtop_replace_space_with_underscore_for_comma=True,
+                texttop_replace_space_with_underscore_for_comma=True,
+                lowercase_general=True,
+                replace_general_space_with_underscore=True,
+                replace_general_space=True,
+                replace_texttop_space_for_comma=False,
+                replace_tagtop_space_for_comma=False,
+                general_by_tagtop=True,
+                general_limit=256,
+                seed=current_seed,
+                temperature=temperature,
+                top_p=top_p,
+                min_p=min_p,
+                top_k=top_k,
+                length_scale=1.0,
+                texttop_length_scale=1.0,
+                tagtop_length_scale=1.0,
+                general_length_scale=1.0,
+                smart_tagtop=True,
+                texttop_replace_space_for_escape=True,
+                replace_texttop_space_for_escape=True,
+                replace_tagtop_space_for_escape=True,
+                tagtop_replace_space_with_underscore_for_escape=True,
+                operations=operations,
+                lowercase_special=True,
+                lowercase_characters=True,
+                lowercase_copyrights=True,
+                lowercase_artist=True,
+                lowercase_general_category=True,
+                lowercase_wildcard=True,
+                remove_wildcard_duplicate=True,
+                remove_special_duplicate=True,
+                remove_characters_duplicate=True,
+                remove_copyrights_duplicate=True,
+                remove_artist_duplicate=True,
+                remove_general_duplicate=True,
+                remove_duplicate_tags=True,
+                remove_duplicate_text=True,
+                replace_space_with_underscore=False,
+                replace_space_with_underscore_for_escape=True,
+                tagtop_to_lowercase=True,
+                texttop_to_lowercase=True,
+                output_format_replace_space_with_underscore=True,
+                output_format_replace_space=True,
+                generated_text_replace_space=True,
+                generated_text_replace_space_with_underscore=True,
+                output_format_lowercase=True,
+                output_format_escape=True,
+                output_format_replace_space_with_single_space=True,
+                output_format_replace_underscore=True,
+                texttop_split_by_comma=True,
+                tagtop_split_by_comma=True,
+                generated_text_split_by_comma=True,
+                generated_text_split_by_comma_for_escape=True,
+                output_format_replace_space_with_comma=True,
+                merge_texttop=True,
+                merge_tagtop=True,
+                allow_multiple=True,
+                replace_comma_with_space=True,
+                tagtop_strip_space=True,
+                texttop_strip_space=True,
+                texttop_replace_commas=True,
+                tagtop_replace_commas=True,
+                meta={
+                    "aspect_ratio": f"{aspect_ratio:.1f}",
+                    "seed": current_seed,
+                    "temperature": temperature,
+                },
+                max_new_tokens=96,
+                repetition_penalty=1.1,
+                device=device,
+                replace_underscore=True,
+                generate_extra_tags_for_output=True,
+                generate_extra_text_for_output=False,
+                output_general=True,
+                output_special=True,
+                output_characters=True,
+                output_copyrights=True,
+                output_artist=True,
+                generate_extra_wildcard=True,
+                tagtop_replace_space_with_underscore_for_output=True,
+                texttop_replace_space_with_underscore_for_output=True,
+                tagtop_replace_underscore_with_space=False,
+                texttop_replace_underscore_with_space=False,
+                generate_extra_prompt=True,
+                generate_extra_nl_prompt=("<|extended|>" in format or "<|generated|>" in format)
             )
-            cat_meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
+            meta["aspect_ratio"] = f"{aspect_ratio:.1f}"
 
             cat_tag_map, _ = tipo_runner(
-                cat_meta, cat_operations, cat_general, "",
+                meta, operations, general, nl_prompt_processed,
                 temperature=temperature, seed=current_seed, top_p=top_p, min_p=min_p, top_k=top_k,
             )
 
-            original_tags_set = set(cat_all_tags)
+            # 生成結果から無効タグを除去
+            if 'general' in cat_tag_map and isinstance(cat_tag_map['general'], list):
+                cat_tag_map['general'] = [
+                    tag for tag in cat_tag_map['general'] 
+                    if not invalid_tag_pattern.match(tag)
+                ]
+
+            # 生成結果の重複除去 + ban除去
+            for key, tag_list in cat_tag_map.items():
+                if isinstance(tag_list, list):
+                    cat_tag_map[key] = list(dict.fromkeys(tag_list))
+
+            # 新規追加タグを抽出
             addon_tags = []
             for tag_list in cat_tag_map.values():
                  if isinstance(tag_list, list):
@@ -193,6 +457,8 @@ class TIPO:
             
             combined_tags_list = cat_all_tags + addon_tags
             unique_tags_list = list(dict.fromkeys(combined_tags_list))
+            # ★ ban除去を追加
+            unique_tags_list = util.filter_banned_tags(unique_tags_list, black_list)
             all_addon_tags_list.extend(addon_tags)
 
             processed_category_tags = ", ".join(unique_tags_list)
@@ -203,6 +469,8 @@ class TIPO:
         # Part 3: 最終的な組み立てと他の戻り値の再構築
         final_prompt = apply_format(final_prompt_parts, format)
         final_tags_list = [tag.strip() for tag in final_prompt.split(',') if tag.strip()]
+        # ★ ban除去を追加
+        final_tags_list = util.filter_banned_tags(final_tags_list, black_list)
         final_prompt = ", ".join(list(dict.fromkeys(final_tags_list)))
 
         all_original_tags_str = ", ".join(list(dict.fromkeys(all_original_tags_list)))
@@ -212,17 +480,13 @@ class TIPO:
         user_prompt_parts = seperate_tags(all_original_tags_list)
         formatted_prompt_by_user = apply_format(user_prompt_parts, format)
         
-        for category_name, original_tags in category_prompts.items():
-            formatted_placeholder = f"<|wildcard_{category_name}|>"
-            formatted_prompt_by_user = formatted_prompt_by_user.replace(formatted_placeholder, original_tags)
-        
-        user_tags_list = [tag.strip() for tag in formatted_prompt_by_user.split(',') if tag.strip()]
-        formatted_prompt_by_user = ", ".join(list(dict.fromkeys(user_tags_list)))
-        unformatted_prompt_by_user = all_original_tags_str + "\n" + nl_prompt
+        main_processed = ", ".join(tag_map_main.get("general", [])) if 'tag_map_main' in locals() else ""
         
         return (
-            final_prompt, formatted_prompt_by_user, unformatted_prompt_by_tipo, unformatted_prompt_by_user,
-            category_outputs.get("wildcard_appearance", ""),
+            final_prompt,
+            formatted_prompt_by_user,
+            unformatted_prompt_by_tipo,
+            main_processed,
             category_outputs.get("wildcard_clothing", ""),
             category_outputs.get("wildcard_background", ""),
             category_outputs.get("wildcard_pose_emotion", ""),
@@ -237,4 +501,3 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TIPO": "TIPO Wildcard (Refactored)",
 }
-
