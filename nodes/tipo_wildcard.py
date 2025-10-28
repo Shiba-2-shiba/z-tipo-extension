@@ -15,7 +15,7 @@ from . import util
 class TIPO:
     """
     Preprocessorからの入力を使用して、タグの拡張とフォーマットを行う改修版ノード。
-    UIが簡素化され、プロンプト生成のコア機能に特化しています。
+    banタグの最終整形時フィルタを実装し、再混入を防止します。
     """
     @classmethod
     def INPUT_TYPES(s):
@@ -55,7 +55,8 @@ class TIPO:
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",)
+    # ★ 戻り値の数を 9 に修正
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = (
         "final_prompt",
         "formatted_prompt_by_user",
@@ -93,7 +94,7 @@ class TIPO:
         
         aspect_ratio = width / height
         
-        # --- 修正点 1: ban_tagsをリストとして変数に保持 ---
+        # --- ban_tagsをリストとして保持 ---
         black_list = [t.strip() for t in ban_tags.split(",") if t.strip()]
         tipo.BAN_TAGS = black_list
         
@@ -134,7 +135,7 @@ class TIPO:
                 lowercase_nl=True,
                 tagtop_replace_space=True,
                 texttop_replace_space=True,
-                texttop_to_lowercase=True,
+                # texttop_to_lowercase は下で一度だけ指定（★重複回避）
                 merge_nl_prompt=True,
                 replace_text_to_single_space=True,
                 tagtop_replace_space_with_underscore=False,
@@ -199,7 +200,7 @@ class TIPO:
                 replace_space_with_underscore=False,
                 replace_space_with_underscore_for_escape=True,
                 tagtop_to_lowercase=True,
-                texttop_to_lowercase=True,
+                texttop_to_lowercase=True,  # ★ ここで一度だけ指定
                 output_format_replace_space_with_underscore=True,
                 output_format_replace_space=True,
                 generated_text_replace_space=True,
@@ -287,7 +288,7 @@ class TIPO:
                 category_outputs[placeholder_key] = ""
                 continue
 
-            # --- 修正点 2: ループ内で毎回ban_tagsを再設定 ---
+            # ループ内でも毎回ban_tagsを再設定（保険）
             tipo.BAN_TAGS = black_list
 
             logger.info(f"TIPO is extending category: <|{placeholder_key}|>")
@@ -317,7 +318,7 @@ class TIPO:
                 lowercase_nl=True,
                 tagtop_replace_space=True,
                 texttop_replace_space=True,
-                texttop_to_lowercase=True,
+                # texttop_to_lowercase は下で一度だけ指定（★重複回避）
                 merge_nl_prompt=False,
                 replace_text_to_single_space=True,
                 tagtop_replace_space_with_underscore=False,
@@ -382,7 +383,7 @@ class TIPO:
                 replace_space_with_underscore=False,
                 replace_space_with_underscore_for_escape=True,
                 tagtop_to_lowercase=True,
-                texttop_to_lowercase=True,
+                texttop_to_lowercase=True,  # ★ ここで一度だけ指定
                 output_format_replace_space_with_underscore=True,
                 output_format_replace_space=True,
                 generated_text_replace_space=True,
@@ -442,7 +443,7 @@ class TIPO:
                     if not invalid_tag_pattern.match(tag)
                 ]
 
-            # 生成結果の重複除去 + ban除去
+            # 生成結果の重複除去
             for key, tag_list in cat_tag_map.items():
                 if isinstance(tag_list, list):
                     cat_tag_map[key] = list(dict.fromkeys(tag_list))
@@ -450,7 +451,7 @@ class TIPO:
             # 新規追加タグを抽出
             addon_tags = []
             for tag_list in cat_tag_map.values():
-                 if isinstance(tag_list, list):
+                if isinstance(tag_list, list):
                     for tag in tag_list:
                         if tag not in original_tags_set and not invalid_tag_pattern.match(tag):
                             addon_tags.append(tag)
