@@ -50,7 +50,7 @@ def load_tipo_model(tipo_model: str, device: str):
 # --- Prompt Parsing Utilities ---
 attn_syntax = (
     r"\\\(|" r"\\\)|" r"\\\[|" r"\\]|" r"\\\\|" r"\\|"
-    r"\(|" r"\[|" r":\s*([+-]?[.\d]+)\s*\)|" r"\)|" r"]|"
+    r"\(|" r"\[|" r":\s*([+-]?[\.\d]+)\s*\)|" r"\)|" r"]|"
     r"[^\\()\[\]:]+|" r":"
 )
 re_attention = re.compile(attn_syntax, re.X)
@@ -96,7 +96,7 @@ def parse_prompt_attention(text):
     for pos in round_brackets:
         multiply_range(pos, round_bracket_multiplier)
     for pos in square_brackets:
-        multiply_range(pos, square_bracket_multiplier)
+        multiply_range(pos, square_brackets_multiplier)
 
     if len(res) == 0:
         res = [["", 1.0]]
@@ -141,3 +141,54 @@ def apply_strength(tag_map, strength_map, strength_map_nl):
             tag_map[cate] = new_list
             
     return tag_map
+
+
+# --- Ban フィルタ（最終整形での再混入を防ぐ共通ユーティリティ） ---
+_normalize_space_underscore = re.compile(r"[\s_]+")
+_weight_wrap = re.compile(r"^[\(\[]?(.+?)(?::[0-9.\-]+)?[\)\]]?$")
+
+def normalize_tag(text: str) -> str:
+    """タグ比較用の正規化。重み (tag:1.2) や括弧を外し、小文字化し、空白/アンダースコアを単一空白に統一。"""
+    if not text:
+        return ""
+    core = _weight_wrap.sub(r"\1", text.strip())
+    core = _normalize_space_underscore.sub(" ", core.lower())
+    return core.strip()
+
+
+def _expand_ban_forms(bans: list[str]) -> set[str]:
+    """最低限の同義形を補完（単純複数形）。例: 'no human' -> {'no human', 'no humans'}"""
+    out: set[str] = set()
+    for b in bans:
+        n = normalize_tag(b)
+        if not n:
+            continue
+        out.add(n)
+        if not n.endswith("s"):
+            out.add(n + "s")
+    return out
+
+
+def is_banned(tag: str, ban_list: list[str]) -> bool:
+    if not tag:
+        return False
+    ntag = normalize_tag(tag)
+    ban_norm = _expand_ban_forms(ban_list)
+    return ntag in ban_norm
+
+
+def filter_banned_tags(tags: list[str], ban_list: list[str]) -> list[str]:
+    """タグ配列から ban に該当する要素と空要素を除外。正規化後の重複も排除。"""
+    seen = set()
+    filtered: list[str] = []
+    for t in tags:
+        if not t:
+            continue
+        if is_banned(t, ban_list):
+            continue
+        key = normalize_tag(t)
+        if key in seen:
+            continue
+        seen.add(key)
+        filtered.append(t)
+    return filtered
